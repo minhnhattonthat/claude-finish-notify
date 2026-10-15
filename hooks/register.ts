@@ -36,17 +36,21 @@ public static class Win {
     return found.ToArray();
   }
   public static uint Pid(IntPtr h) { uint p; GetWindowThreadProcessId(h, out p); return p; }
-  // Visible titled window of any listed process; prefers one whose title has name.
-  public static IntPtr FindWindow(uint[] pids, string name) {
-    IntPtr first = IntPtr.Zero, hit = IntPtr.Zero;
+  // Visible titled window of any listed process, matching names in order (deepest folder first):
+  // a title segment ("file - folder - profile - app") equal to a name wins, then a substring, else the topmost window.
+  public static IntPtr FindWindow(uint[] pids, string[] names) {
+    var hs = new System.Collections.Generic.List<IntPtr>(); var ts = new System.Collections.Generic.List<string>();
     EnumWindows(delegate(IntPtr h, IntPtr l) {
       if (!IsWindowVisible(h) || Array.IndexOf(pids, Pid(h)) < 0) return true;
       var sb = new StringBuilder(256); GetWindowText(h, sb, 256);
-      string t = sb.ToString(); if (t.Length == 0) return true;
-      if (first == IntPtr.Zero) first = h;
-      if (hit == IntPtr.Zero && t.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0) hit = h;
+      if (sb.Length > 0) { hs.Add(h); ts.Add(sb.ToString()); }
       return true; }, IntPtr.Zero);
-    return hit != IntPtr.Zero ? hit : first;
+    foreach (var n in names) for (int i = 0; i < hs.Count; i++)
+      foreach (var seg in ts[i].Split(new string[] { " - " }, StringSplitOptions.None))
+        if (string.Equals(seg.Replace(" (Workspace)", ""), n, StringComparison.OrdinalIgnoreCase)) return hs[i];
+    foreach (var n in names) for (int i = 0; i < hs.Count; i++)
+      if (ts[i].IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0) return hs[i];
+    return hs.Count > 0 ? hs[0] : IntPtr.Zero;
   }
   // Sets the title of the console owned by pid (the tab or pane running it) via OSC 0.
   public static void SetTitle(uint pid, string title) {
@@ -77,8 +81,9 @@ foreach ($p in $pids) {
     }
   }
 }
-# Hidden pseudo-console (VS Code etc.): fall back to a window of an ancestor process, by project name.
-if ($term -eq [IntPtr]::Zero) { $term = [Win]::FindWindow($pids, $project) }
+# Hidden pseudo-console (VS Code etc.): fall back to a window of an ancestor process, by cwd folder (the workspace may be a parent of cwd).
+$names = [string[]]@(($env:CC_CWD -split '[\\/]' | Where-Object { $_ })[-1..-2] | Where-Object { $_ })
+if ($term -eq [IntPtr]::Zero) { $term = [Win]::FindWindow($pids, $names) }
 if ($term -ne [IntPtr]::Zero) { $isWT = (Get-Process -Id ([Win]::Pid($term))).ProcessName -eq 'WindowsTerminal' }
 if ($env:CC_DEBUG) { "term=$term wt=$isWT conPid=$conPid" }
 
@@ -172,7 +177,8 @@ export const register: Register = on => {
     const done = await next(e)
 
     if (e.agentId === undefined && !e.isAborted) {
-      const project = (await $.session.cwd()).split(/[\\/]/).filter(Boolean).pop() ?? 'Claude'
+      const cwd = await $.session.cwd()
+      const project = cwd.split(/[\\/]/).filter(Boolean).pop() ?? 'Claude'
       const prefix = e.reason === 'answer' ? '' : `Stopped (${e.reason}): `
       const flat = prefix + e.answer.replace(/\s+/g, ' ').trim()
       const body = flat.length > 100 ? flat.slice(0, 99) + '…' : flat // two lines in the popup
@@ -180,7 +186,7 @@ export const register: Register = on => {
       // not awaited: the popup lives until clicked or its 20 s timer
       void $.process
         .run(['powershell', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', 'iex $env:CC_PS'], {
-          env: { CC_PS: SCRIPT, CC_TITLE: project, CC_BODY: body },
+          env: { CC_PS: SCRIPT, CC_TITLE: project, CC_CWD: cwd, CC_BODY: body },
           timeoutMs: 30000,
         })
         .catch(() => {})
