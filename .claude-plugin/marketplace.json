@@ -1,0 +1,11 @@
+{
+  "name": "finish-notify",
+  "owner": { "name": "minhnhattonthat" },
+  "plugins": [
+    {
+      "name": "finish-notify",
+      "source": "./",
+      "description": "Claude-styled popup with a Focus-terminal button whenever Claude finishes a response (Windows)."
+    }
+  ]
+}
