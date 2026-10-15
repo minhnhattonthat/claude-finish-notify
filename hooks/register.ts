@@ -180,12 +180,15 @@ export const register: Register = on => {
       const flat = prefix + e.answer.replace(/\s+/g, ' ').trim()
       const body = flat.length > 100 ? flat.slice(0, 99) + '…' : flat // two lines in the popup
 
-      // not awaited: the popup lives until clicked
-      void $.process
-        .run(['powershell', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', 'iex $env:CC_PS'], {
+      // spawn, not run: run kills the child after its 30 s timeout. Not awaited: the popup lives until clicked
+      // (or until the session ends or the mod reloads, which kill the child).
+      void (async () => {
+        const popup = $.process.spawn({
+          argv: ['powershell', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', 'iex $env:CC_PS'],
           env: { CC_PS: SCRIPT, CC_TITLE: project, CC_CWD: cwd, CC_BODY: body },
         })
-        .catch(() => {})
+        for await (const _ of popup);
+      })().catch(() => {})
     }
 
     return done
