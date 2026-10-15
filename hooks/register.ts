@@ -135,13 +135,12 @@ $wa = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
 # Stacking: each popup's title carries its start time; newest sits at the bottom, older ones above it, like native toasts.
 $born = [DateTime]::UtcNow.Ticks
 $f.Text = "cc-finish-notify|$born"
-# At most 3 show; older ones wait hidden (timer paused) and return when a newer one closes.
+# At most 3 show; older ones wait hidden and return when a newer one closes.
 function Place {
   $slot = @([Win]::Titles('cc-finish-notify|') | Where-Object { [long]($_.Split('|')[1]) -gt $born }).Count
-  if ($slot -ge 3) { if ($f.Visible) { $f.Visible = $false }; if ($timer) { $timer.Stop() }; return }
+  if ($slot -ge 3) { if ($f.Visible) { $f.Visible = $false }; return }
   $f.Location = New-Object Drawing.Point(($wa.Right - $f.Width - (S 12)), ($wa.Bottom - ($f.Height + (S 12)) * ($slot + 1)))
   if (-not $f.Visible) { $f.Visible = $true }
-  if ($timer -and -not $timer.Enabled) { $timer.Start() }
 }
 Place
 $f.Add_Shown({ Place })
@@ -167,8 +166,6 @@ $f.Controls.AddRange(@($icon, $app, $title, $body, $go))
 
 $restack = New-Object Windows.Forms.Timer -Property @{ Interval = 250 }
 $restack.Add_Tick({ Place }); $restack.Start()
-$timer = New-Object Windows.Forms.Timer -Property @{ Interval = 20000 }
-$timer.Add_Tick({ $f.Close() })
 [Windows.Forms.Application]::Run($f)
 `
 
@@ -183,11 +180,10 @@ export const register: Register = on => {
       const flat = prefix + e.answer.replace(/\s+/g, ' ').trim()
       const body = flat.length > 100 ? flat.slice(0, 99) + '…' : flat // two lines in the popup
 
-      // not awaited: the popup lives until clicked or its 20 s timer
+      // not awaited: the popup lives until clicked
       void $.process
         .run(['powershell', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', 'iex $env:CC_PS'], {
           env: { CC_PS: SCRIPT, CC_TITLE: project, CC_CWD: cwd, CC_BODY: body },
-          timeoutMs: 30000,
         })
         .catch(() => {})
     }
